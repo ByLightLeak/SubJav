@@ -2,7 +2,6 @@
 subtitle.py - 組合 SRT 格式字幕
 """
 from pathlib import Path
-from typing import List
 
 from .transcribe import Segment
 
@@ -19,7 +18,7 @@ def _format_timestamp(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def build_srt(segments: List[Segment], translations: List[str]) -> str:
+def build_srt(segments: list[Segment], translations: list[str]) -> str:
     """
     組合 SRT 格式字串。
 
@@ -35,7 +34,7 @@ def build_srt(segments: List[Segment], translations: List[str]) -> str:
             f"segments 數量 ({len(segments)}) 與 translations 數量 ({len(translations)}) 不符"
         )
 
-    lines: List[str] = []
+    lines: list[str] = []
     for idx, (seg, trans) in enumerate(zip(segments, translations), start=1):
         start_ts = _format_timestamp(seg.start)
         end_ts = _format_timestamp(seg.end)

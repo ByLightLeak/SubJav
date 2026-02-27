@@ -2,7 +2,7 @@
 name = "subjav"
 version = "0.1.0"
 description = "Japanese video auto-subtitle generator (ASR + LLM translation)"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "mlx-audio>=0.3.1",
     "httpx",

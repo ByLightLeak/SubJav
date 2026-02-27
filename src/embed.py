@@ -75,4 +75,4 @@ def _run_ffmpeg(cmd: list[str]) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg 執行失敗:\n{result.stderr[-2000:]}")
-    print(f"[embed] 完成")
+    print("[embed] 完成")

@@ -3,9 +3,9 @@ transcribe.py - 使用 mlx-audio (Whisper Large V3) 轉錄日語音軌
 """
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
 
 
 @dataclass
@@ -13,7 +13,6 @@ class Segment:
     start: float   # 秒
     end: float     # 秒
     text: str      # 原文（日語）
-    translated: str = field(default="")  # 翻譯後（中文）
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".flv"}
@@ -61,7 +60,40 @@ def extract_audio(video_path: Path, audio_path: Path) -> None:
     print(f"[transcribe] 音檔已儲存: {audio_path}")
 
 
-def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> List[Segment]:
+@contextmanager
+def prepare_audio(input_path: Path, audio_save_path: Path | None, label: str):
+    """影片 → WAV（共用快取）；非影片直接 yield；暫存檔使用後自動清除。"""
+    if input_path.suffix.lower() not in VIDEO_EXTENSIONS:
+        yield input_path
+        return
+
+    if audio_save_path is not None:
+        audio_path = audio_save_path
+        cleanup = False
+    else:
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        audio_path = Path(tmp.name)
+        tmp.close()
+        cleanup = True
+
+    if audio_path.exists():
+        print(f"[{label}] 音檔已存在，跳過抽取: {audio_path.name}")
+    else:
+        try:
+            extract_audio(input_path, audio_path)
+        except Exception:
+            if cleanup:
+                audio_path.unlink(missing_ok=True)
+            raise
+
+    try:
+        yield audio_path
+    finally:
+        if cleanup:
+            audio_path.unlink(missing_ok=True)
+
+
+def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> list[Segment]:
     """
     轉錄影片或音訊檔案。
 
@@ -70,7 +102,7 @@ def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> L
         audio_save_path: 音檔儲存路徑（None 則用暫存檔，影片輸入才有效）
 
     Returns:
-        List[Segment]，每個 Segment 含 start、end、text
+        list[Segment]，每個 Segment 含 start、end、text
     """
     import mlx.core as mx
     from mlx_audio.stt.utils import load_model as stt_load
@@ -79,33 +111,8 @@ def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> L
     if not input_path.exists():
         raise FileNotFoundError(f"找不到檔案: {input_path}")
 
-    is_video = input_path.suffix.lower() in VIDEO_EXTENSIONS
-
-    # 1. 抽音軌
-    if is_video:
-        if audio_save_path is None:
-            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            audio_path = Path(tmp.name)
-            tmp.close()
-            cleanup = True
-        else:
-            audio_path = audio_save_path
-            cleanup = False
-        if audio_path.exists():
-            print(f"[transcribe] 音檔已存在，跳過抽取: {audio_path.name}")
-        else:
-            try:
-                extract_audio(input_path, audio_path)
-            except Exception:
-                if cleanup:
-                    audio_path.unlink(missing_ok=True)
-                raise
-    else:
-        audio_path = input_path
-        cleanup = False
-
-    try:
-        print(f"[transcribe] 開始轉錄（mlx-audio Whisper Large V3）...")
+    with prepare_audio(input_path, audio_save_path, "transcribe") as audio_path:
+        print("[transcribe] 開始轉錄（mlx-audio Whisper Large V3）...")
         try:
             model = stt_load(MLX_MODEL)
         except ValueError as e:
@@ -130,17 +137,13 @@ def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> L
             append_punctuations="\"'.。,，!！?？:：\")]}、」』】〕）～…",
         )
 
-        # 釋放模型
         del model
         mx.clear_cache()
 
-        all_segments: List[Segment] = [
+        all_segments: list[Segment] = [
             Segment(start=s["start"], end=s["end"], text=s["text"].strip())
             for s in (result.segments or [])
             if s["text"].strip()
         ]
         print(f"[transcribe] 完成，共 {len(all_segments)} 段")
         return all_segments
-    finally:
-        if cleanup:
-            audio_path.unlink(missing_ok=True)

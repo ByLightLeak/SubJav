@@ -18,6 +18,9 @@ env/
 # uv
 .python-version
 
+# User config (contains personal paths)
+subjav.toml
+
 # Output files
 output/
 

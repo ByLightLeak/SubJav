@@ -1,6 +1,6 @@
 """
 transcribe_qwen3.py - 使用 mlx-audio (Qwen3-ASR-1.7B-8bit + ForcedAligner) 轉錄日語音軌
-回傳與 transcribe.py 相同的 List[Segment] 格式
+回傳與 transcribe.py 相同的 list[Segment] 格式
 
 流程：
   1. 抽音軌（共用快取）
@@ -10,13 +10,11 @@ transcribe_qwen3.py - 使用 mlx-audio (Qwen3-ASR-1.7B-8bit + ForcedAligner) 轉
   5. 按原始文字的 。！？ 切句，對應 items index → Segment
 """
 import re
-import tempfile
 from pathlib import Path
-from typing import List, Tuple
 
 import numpy as np
 
-from .transcribe import Segment, VIDEO_EXTENSIONS, extract_audio
+from .transcribe import Segment, prepare_audio
 
 QWEN3_ASR_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
 QWEN3_ALIGNER_MODEL = "mlx-community/Qwen3-ForcedAligner-0.6B-8bit"
@@ -25,10 +23,10 @@ _SENT_END_RE = re.compile(r"([。！？])")
 _MIN_SEGMENT_SEC = 0.5
 
 
-def _split_sentences(text: str) -> List[str]:
+def _split_sentences(text: str) -> list[str]:
     """按 。！？ 切句，標點保留在句尾。"""
     parts = _SENT_END_RE.split(text)
-    sentences: List[str] = []
+    sentences: list[str] = []
     cur = ""
     for part in parts:
         cur += part
@@ -60,7 +58,7 @@ def _count_clean_tokens(text: str) -> int:
     return sum(1 for w in words if any(is_kept(ch) for ch in w))
 
 
-def _items_to_segments(items, text: str, chunk_offset: float) -> List[Segment]:
+def _items_to_segments(items, text: str, chunk_offset: float) -> list[Segment]:
     """
     把 ForcedAligner 的詞級 items（無標點）＋原始文字（含標點），
     切成句子級 Segment，加上 chunk offset。
@@ -74,7 +72,7 @@ def _items_to_segments(items, text: str, chunk_offset: float) -> List[Segment]:
     if not sentences or not items:
         return []
 
-    segments: List[Segment] = []
+    segments: list[Segment] = []
     item_idx = 0
 
     for sentence in sentences:
@@ -84,9 +82,6 @@ def _items_to_segments(items, text: str, chunk_offset: float) -> List[Segment]:
 
         sent_items = items[item_idx: item_idx + n]
         item_idx += n
-
-        if not sent_items:
-            continue
 
         start = sent_items[0].start_time
         end = sent_items[-1].end_time
@@ -106,16 +101,16 @@ def _items_to_segments(items, text: str, chunk_offset: float) -> List[Segment]:
     return segments
 
 
-def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None) -> List[Segment]:
+def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None) -> list[Segment]:
     """
-    使用 Qwen3-ASR + ForcedAligner 轉錄影片或音訊，回傳 List[Segment]。
+    使用 Qwen3-ASR + ForcedAligner 轉錄影片或音訊，回傳 list[Segment]。
 
     Args:
         input_path: 影片或音訊檔路徑
         audio_save_path: 音檔儲存路徑（None 則用暫存檔）
 
     Returns:
-        List[Segment]，每個 Segment 含 start（秒）、end（秒）、text（日語）
+        list[Segment]，每個 Segment 含 start（秒）、end（秒）、text（日語）
     """
     import mlx.core as mx
     from mlx_audio.stt.utils import load_audio, load_model as stt_load
@@ -125,33 +120,9 @@ def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None
     if not input_path.exists():
         raise FileNotFoundError(f"找不到檔案: {input_path}")
 
-    is_video = input_path.suffix.lower() in VIDEO_EXTENSIONS
-
-    # 1. 抽音軌（共用快取）
-    cleanup = False
-    if is_video:
-        if audio_save_path is None:
-            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            audio_path = Path(tmp.name)
-            tmp.close()
-            cleanup = True
-        else:
-            audio_path = audio_save_path
-        if audio_path.exists():
-            print(f"[qwen3-asr] 音檔已存在，跳過抽取: {audio_path.name}")
-        else:
-            try:
-                extract_audio(input_path, audio_path)
-            except Exception:
-                if cleanup:
-                    audio_path.unlink(missing_ok=True)
-                raise
-    else:
-        audio_path = input_path
-
-    try:
+    with prepare_audio(input_path, audio_save_path, "qwen3-asr") as audio_path:
         # 2. 載入音訊並切 chunk
-        print(f"[qwen3-asr] 載入音訊...")
+        print("[qwen3-asr] 載入音訊...")
         audio_np = np.array(load_audio(str(audio_path)))
         chunks = split_audio_into_chunks(audio_np, sr=16000, chunk_duration=120.0)
         print(f"[qwen3-asr] 分為 {len(chunks)} 個 chunk")
@@ -160,7 +131,7 @@ def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None
         print(f"[qwen3-asr] 載入 ASR 模型 ({QWEN3_ASR_MODEL})...")
         asr_model = stt_load(QWEN3_ASR_MODEL)
 
-        chunk_data: List[Tuple[np.ndarray, float, str]] = []
+        chunk_data: list[tuple[np.ndarray, float, str]] = []
         for i, (chunk_audio, offset_sec) in enumerate(chunks):
             print(f"[qwen3-asr] ASR chunk {i+1}/{len(chunks)} (offset={offset_sec:.1f}s)...")
             result = asr_model.generate(
@@ -189,7 +160,7 @@ def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None
         print(f"[qwen3-asr] 載入 ForcedAligner ({QWEN3_ALIGNER_MODEL})...")
         aligner = stt_load(QWEN3_ALIGNER_MODEL)
 
-        all_segments: List[Segment] = []
+        all_segments: list[Segment] = []
         for i, (chunk_audio, offset_sec, text) in enumerate(chunk_data):
             if not text:
                 print(f"[qwen3-asr] Chunk {i+1} 無文字，跳過")
@@ -204,7 +175,3 @@ def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None
 
         print(f"[qwen3-asr] 完成，共 {len(all_segments)} 段")
         return all_segments
-
-    finally:
-        if cleanup:
-            audio_path.unlink(missing_ok=True)

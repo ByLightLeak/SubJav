@@ -4,9 +4,9 @@ translate.py - 透過 Ollama HTTP API 呼叫 qwen3:14b 批次翻譯日語字幕
 import re
 import time
 import httpx
-from typing import List
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+_NUMBERED_RE = re.compile(r'^(\d+)\s*[|.:)\-]\s*(.+)$')
 MODEL = "qwen3:14b"
 BATCH_SIZE = 10
 CONTEXT_LINES = 10  # 傳給模型的前文段數
@@ -73,19 +73,32 @@ def _call_ollama(prompt: str, system: str = SYSTEM_PROMPT, timeout: float = 120.
     return response.json().get("response", "").strip()
 
 
+def _parse_numbered_response(raw: str) -> list[tuple[int, str]]:
+    """解析 LLM 輸出的 'N|文字' 格式，回傳 [(index, text), ...]。"""
+    results = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _NUMBERED_RE.match(line)
+        if m:
+            results.append((int(m.group(1)), m.group(2).strip()))
+    return results
+
+
 def _clean(text: str) -> str:
     """清理 LLM 輸出：去除多餘引號、空白、意外的編號前綴"""
     text = text.strip()
     if len(text) >= 2 and text[0] in ('"', "'") and text[-1] == text[0]:
         text = text[1:-1]
     # 去除模型在單段模式下多輸出的 "1|" 或 "1. " 前綴
-    m = re.match(r'^\d+\s*[|.:)\-]\s*(.+)$', text)
+    m = _NUMBERED_RE.match(text)
     if m:
-        text = m.group(1)
+        text = m.group(2)
     return text.strip()
 
 
-def _build_context_block(context: List[tuple[str, str]] | None) -> str:
+def _build_context_block(context: list[tuple[str, str]] | None) -> str:
     if not context:
         return ""
     lines = [f"- 「{ja}」→「{zh}」" for ja, zh in context]
@@ -99,7 +112,7 @@ def _translate_single(text: str, context_block: str) -> str:
     return _clean(result) or text  # 空結果 fallback 原文
 
 
-def _translate_batch(texts: List[str], context: List[tuple[str, str]] | None = None) -> List[str]:
+def _translate_batch(texts: list[str], context: list[tuple[str, str]] | None = None) -> list[str]:
     """批次翻譯，使用編號格式，解析失敗時逐條重試"""
     context_block = _build_context_block(context)
 
@@ -118,15 +131,7 @@ def _translate_batch(texts: List[str], context: List[tuple[str, str]] | None = N
     raw = _call_ollama(prompt)
 
     # 解析 "N|譯文" 格式
-    parsed: dict[int, str] = {}
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        m = re.match(r'^(\d+)\s*[|.:)\-]\s*(.+)$', line)
-        if m:
-            idx = int(m.group(1))
-            parsed[idx] = _clean(m.group(2))
+    parsed = {idx: _clean(text) for idx, text in _parse_numbered_response(raw)}
 
     # 組合結果，解析失敗的條目單獨重試
     results = []
@@ -140,7 +145,7 @@ def _translate_batch(texts: List[str], context: List[tuple[str, str]] | None = N
     return results
 
 
-def translate(texts: List[str]) -> List[str]:
+def translate(texts: list[str]) -> list[str]:
     """
     批次翻譯日語字幕為繁體中文。
 
@@ -153,7 +158,7 @@ def translate(texts: List[str]) -> List[str]:
     if not texts:
         return []
 
-    results: List[str] = []
+    results: list[str] = []
     total_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
 
     for i in range(0, len(texts), BATCH_SIZE):
@@ -222,7 +227,7 @@ ORPHAN_PROMPT_TEMPLATE = """\
 def merge_with_llm(whisper_segs: list, qwen3_segs: list) -> list:
     """
     以 LLM 合併 Whisper（時間準）+ Qwen3（文字準）兩組 segments。
-    回傳 List[Segment]：Whisper 時間戳 + 最佳日語文字。
+    回傳 list[Segment]：Whisper 時間戳 + 最佳日語文字。
     Whisper 未覆蓋但 Qwen3 有的段落，送 LLM 判斷後視情況保留。
     """
     from .transcribe import Segment
@@ -262,14 +267,7 @@ def merge_with_llm(whisper_segs: list, qwen3_segs: list) -> list:
         elapsed = time.time() - t0
         print(f" done ({elapsed:.1f}s)")
 
-        parsed: dict[int, str] = {}
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            m = re.match(r'^(\d+)\s*[|.:)\-]\s*(.+)$', line)
-            if m:
-                parsed[int(m.group(1))] = m.group(2).strip()
+        parsed = {idx: text for idx, text in _parse_numbered_response(raw)}
 
         for j, w in enumerate(batch):
             text = parsed.get(j + 1, w.text)
@@ -293,17 +291,11 @@ def merge_with_llm(whisper_segs: list, qwen3_segs: list) -> list:
             prompt = ORPHAN_PROMPT_TEMPLATE.format(segments=lines)
             raw = _call_ollama(prompt, system=MERGE_SYSTEM, options=MERGE_OPTIONS)
 
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                m = re.match(r'^(\d+)\s*[|.:)\-]\s*(.+)$', line)
-                if m:
-                    idx = int(m.group(1)) - 1
-                    text = m.group(2).strip()
-                    if text.upper() != "SKIP" and 0 <= idx < len(batch):
-                        q = batch[idx]
-                        results.append(Segment(start=q.start, end=q.end, text=text))
+            for idx, text in _parse_numbered_response(raw):
+                idx -= 1
+                if text.upper() != "SKIP" and 0 <= idx < len(batch):
+                    q = batch[idx]
+                    results.append(Segment(start=q.start, end=q.end, text=text))
 
     results.sort(key=lambda s: s.start)
     print(f"[merge] 完成，共 {len(results)} 段")
@@ -323,23 +315,18 @@ def punctuate_japanese(text: str) -> str:
     """為日語 ASR 原始文字補上標點符號（。、！？）。失敗時 fallback 原文。"""
     if not text:
         return text
-    payload = {
-        "model": MODEL,
-        "system": PUNCTUATE_SYSTEM,
-        "prompt": PUNCTUATE_PROMPT.format(text=text),
-        "stream": False,
-        "think": False,
-        "options": {
-            "temperature": 0.3,
-            "num_predict": min(len(text) + 200, 4096),
-            "num_ctx": 4096,
-            "repeat_penalty": 1.2,
-        },
-    }
     try:
-        response = httpx.post(OLLAMA_URL, json=payload, timeout=60.0)
-        response.raise_for_status()
-        result = response.json().get("response", "").strip()
+        result = _call_ollama(
+            PUNCTUATE_PROMPT.format(text=text),
+            system=PUNCTUATE_SYSTEM,
+            timeout=60.0,
+            options={
+                "temperature": 0.3,
+                "num_predict": min(len(text) + 200, 4096),
+                "num_ctx": 4096,
+                "repeat_penalty": 1.2,
+            },
+        )
         return result if result else text
     except Exception:
         return text  # 失敗時 fallback 原文

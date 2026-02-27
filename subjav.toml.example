@@ -1,0 +1,22 @@
+[defaults]
+# 影片根目錄
+#   不帶參數直接跑 subjav → 自動掃此目錄下所有影片逐一處理
+#   帶相對路徑跑 subjav fc2-ppv-xxx/xxx.mp4 → 以此目錄為基準解析路徑
+video_dir = "/path/to/your/video/directory"
+
+# ASR 後端
+#   whisper  Whisper Large V3，時間戳準確
+#   qwen3    Qwen3-ASR，日語辨識品質較好
+#   hybrid   兩者合併（Whisper 時間戳 + Qwen3 文字），品質最佳但最慢
+backend = "hybrid"
+
+# true  → 輸出檔案放在影片同一目錄
+# false → 另建 output/<影片名>/ 目錄
+output_beside_video = true
+
+# 字幕嵌入模式
+#   srt_only = false, hard_sub = false → 產 SRT + 嵌入軟字幕（完整流程）
+#   srt_only = false, hard_sub = true  → 產 SRT + 嵌入硬字幕（燒錄進畫面）
+#   srt_only = true                    → 只產 SRT，不嵌入影片
+srt_only = true
+hard_sub = false
