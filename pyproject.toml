@@ -5,6 +5,7 @@ description = "Japanese video auto-subtitle generator (ASR + LLM translation)"
 requires-python = ">=3.11"
 dependencies = [
     "mlx-audio>=0.3.1",
+    "mlx-whisper>=0.4.0",
     "httpx",
     "typer",
     "nagisa>=0.2.12",

@@ -1,5 +1,5 @@
 """
-transcribe.py - 使用 mlx-audio (Whisper Large V3) 轉錄日語音軌
+transcribe.py - 使用 mlx-whisper (Whisper Large V3) 轉錄日語音軌
 """
 import subprocess
 import tempfile
@@ -51,26 +51,6 @@ def _filter_hallucinations(segments: list[Segment]) -> list[Segment]:
         print(f"[transcribe] 過濾連續重複幻覺: {repeated} 段")
 
     return deduped
-
-
-def _ensure_whisper_processor() -> None:
-    """
-    mlx-community/whisper-large-v3-mlx 是給舊版 mlx-whisper 套件打包的，
-    缺少 mlx-audio 需要的 WhisperProcessor 檔案。
-    首次載入失敗時自動從 openai/whisper-large-v3 下載補齊（小檔，約 5MB）。
-    """
-    from huggingface_hub import snapshot_download
-    from transformers import WhisperProcessor
-
-    snapshot_path = Path(snapshot_download(MLX_MODEL, local_files_only=True))
-    if (snapshot_path / "preprocessor_config.json").exists() or \
-       (snapshot_path / "processor_config.json").exists():
-        return
-
-    print("[transcribe] 自動補充 WhisperProcessor 檔案（首次執行）...")
-    proc = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
-    proc.save_pretrained(str(snapshot_path))
-    print("[transcribe] WhisperProcessor 補充完成")
 
 
 def extract_audio(video_path: Path, audio_path: Path) -> None:
@@ -136,47 +116,40 @@ def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> l
         list[Segment]，每個 Segment 含 start、end、text
     """
     import mlx.core as mx
-    from mlx_audio.stt.utils import load_model as stt_load
+    import mlx_whisper
 
     input_path = Path(input_path)
     if not input_path.exists():
         raise FileNotFoundError(f"找不到檔案: {input_path}")
 
+    # word_timestamps 會造成記憶體持續成長，限制 Metal cache
+    mx.set_cache_limit(100_000_000)
+
     with prepare_audio(input_path, audio_save_path, "transcribe") as audio_path:
-        print("[transcribe] 開始轉錄（mlx-audio Whisper Large V3）...")
+        print("[transcribe] 開始轉錄（mlx-whisper Whisper Large V3）...")
 
-        def _generate(m) -> object:
-            return m.generate(
-                str(audio_path),
-                language="ja",
-                initial_prompt=INITIAL_PROMPT,
-                verbose=False,
-                compression_ratio_threshold=2.4,
-                logprob_threshold=-1.0,
-                no_speech_threshold=0.4,
-                hallucination_silence_threshold=2.0,
-                condition_on_previous_text=False,
-                temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-                prepend_punctuations="\"'¿([{-「『【〔（",
-                append_punctuations="\"'.。,，!！?？:：\")]}、」』】〕）～…",
-            )
+        result = mlx_whisper.transcribe(
+            str(audio_path),
+            path_or_hf_repo=MLX_MODEL,
+            language="ja",
+            initial_prompt=INITIAL_PROMPT,
+            verbose=False,
+            word_timestamps=True,
+            hallucination_silence_threshold=2.0,
+            compression_ratio_threshold=2.4,
+            logprob_threshold=-1.0,
+            no_speech_threshold=0.4,
+            condition_on_previous_text=False,
+            temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+            prepend_punctuations="\"'¿([{-「『【〔（",
+            append_punctuations="\"'.。,，!！?？:：\")]}、」』】〕）～…",
+        )
 
-        model = stt_load(MLX_MODEL)
-        try:
-            result = _generate(model)
-        except ValueError as e:
-            if "Processor not found" not in str(e):
-                raise
-            _ensure_whisper_processor()
-            model = stt_load(MLX_MODEL)
-            result = _generate(model)
-
-        del model
         mx.clear_cache()
 
         all_segments: list[Segment] = [
             Segment(start=s["start"], end=s["end"], text=s["text"].strip())
-            for s in (result.segments or [])
+            for s in (result.get("segments") or [])
             if s["text"].strip()
         ]
         filtered = _filter_hallucinations(all_segments)
