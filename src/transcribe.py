@@ -22,6 +22,37 @@ MLX_MODEL = "mlx-community/whisper-large-v3-mlx"
 INITIAL_PROMPT = "日本語のアダルトビデオ。あっ、はぁ、んっ、うぁ、ふぁ、ひゃ、うん、あーん、おっ、いやん、ふぅ、ひぃ、んぁ、あぁ。ダメ。気持ちいい。もっと奥まで。イキそう。中に出さないで。感じてる。濡れてる。イっちゃう。舐めていい？乳首が好き。恥ずかしい。出していい？気持ちよかった。フェラ、クンニ、手マン、手コキ、パイズリ、アナル、騎乗位、バック、中出し、顔射、潮吹き、射精。クリトリス、おまんこ、チンポ、おちんちん、膣、乳頭、おっぱい、亀頭、お尻、挿入、性感帯。"
 
 
+def _filter_hallucinations(segments: list[Segment]) -> list[Segment]:
+    """
+    移除 Whisper 幻覺片段：
+    1. 反轉時間戳（end <= start）→ 必然是幻覺
+    2. 連續重複文字（相同文字連續出現 N 次）→ Whisper loop 幻覺
+    """
+    # 1. 移除反轉時間戳
+    result = [s for s in segments if s.end > s.start]
+    inverted = len(segments) - len(result)
+    if inverted:
+        print(f"[transcribe] 過濾反轉時間戳: {inverted} 段")
+
+    # 2. 移除連續重複（同一文字連續出現超過 2 次則從第 3 次起刪除）
+    deduped: list[Segment] = []
+    consecutive = 0
+    for seg in result:
+        if deduped and seg.text == deduped[-1].text:
+            consecutive += 1
+            if consecutive >= 2:
+                continue  # 同一句連出現 3 次以上才刪
+        else:
+            consecutive = 0
+        deduped.append(seg)
+
+    repeated = len(result) - len(deduped)
+    if repeated:
+        print(f"[transcribe] 過濾連續重複幻覺: {repeated} 段")
+
+    return deduped
+
+
 def _ensure_whisper_processor() -> None:
     """
     mlx-community/whisper-large-v3-mlx 是給舊版 mlx-whisper 套件打包的，
@@ -124,7 +155,7 @@ def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> l
                 logprob_threshold=-1.0,
                 no_speech_threshold=0.4,
                 hallucination_silence_threshold=2.0,
-                condition_on_previous_text=True,
+                condition_on_previous_text=False,
                 temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
                 prepend_punctuations="\"'¿([{-「『【〔（",
                 append_punctuations="\"'.。,，!！?？:：\")]}、」』】〕）～…",
@@ -148,5 +179,6 @@ def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> l
             for s in (result.segments or [])
             if s["text"].strip()
         ]
-        print(f"[transcribe] 完成，共 {len(all_segments)} 段")
-        return all_segments
+        filtered = _filter_hallucinations(all_segments)
+        print(f"[transcribe] 完成，共 {len(all_segments)} 段（過濾後 {len(filtered)} 段）")
+        return filtered

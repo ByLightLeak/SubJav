@@ -34,7 +34,7 @@ SINGLE_PROMPT_TEMPLATE = """\
 {text}"""
 
 OPTIONS = {
-    "temperature": 0.7,
+    "temperature": 0.3,
     "num_predict": 4096,
     "num_ctx": 8192,
     "top_p": 0.8,
@@ -45,7 +45,7 @@ OPTIONS = {
 
 MERGE_OPTIONS = {
     "temperature": 0.1,
-    "num_predict": 512,   # merge 輸出只是短日語文字，不需要長輸出
+    "num_predict": 1024,  # merge 輸出只是短日語文字，1024 提供安全邊際避免截斷
     "num_ctx": 4096,
     "top_p": 0.9,
     "top_k": 20,
@@ -86,8 +86,10 @@ def _parse_numbered_response(raw: str) -> list[tuple[int, str]]:
     return results
 
 
+_TIMESTAMP_PREFIX_RE = re.compile(r'^\d+\.?\d*s(?:-\d+\.?\d*s)?\|')
+
 def _clean(text: str) -> str:
-    """清理 LLM 輸出：去除多餘引號、空白、意外的編號前綴"""
+    """清理 LLM 輸出：去除多餘引號、空白、意外的編號前綴、時間戳前綴"""
     text = text.strip()
     if len(text) >= 2 and text[0] in ('"', "'") and text[-1] == text[0]:
         text = text[1:-1]
@@ -95,6 +97,11 @@ def _clean(text: str) -> str:
     m = _NUMBERED_RE.match(text)
     if m:
         text = m.group(2)
+    # 去除 LLM 把 Whisper 輸入格式複製回來的時間戳前綴，如 "496.8s|" 或 "490.0s-496.8s|"
+    text = _TIMESTAMP_PREFIX_RE.sub('', text)
+    # 過濾 prompt 格式說明標頭洩漏
+    if text == '日語文字':
+        return ''
     return text.strip()
 
 
@@ -245,7 +252,7 @@ def merge_with_llm(whisper_segs: list, qwen3_segs: list) -> list:
         q_overlap = [q for q in qwen3_segs if q.end > window_start and q.start < window_end]
 
         whisper_lines = "\n".join(
-            f"{j+1}|{b.start:.1f}s-{b.end:.1f}s|{b.text}"
+            f"{j+1}|{b.start:.1f}s|{b.text}"
             for j, b in enumerate(batch)
         )
         if q_overlap:

@@ -4,7 +4,7 @@ transcribe_qwen3.py - 使用 mlx-audio (Qwen3-ASR-1.7B-8bit + ForcedAligner) 轉
 
 流程：
   1. 抽音軌（共用快取）
-  2. 切 120s chunk
+  2. 切 60s chunk
   3. ASR model → 每個 chunk 的文字（含標點）
   4. ForcedAligner → 詞級時間戳（標點已被過濾，items 只有字/詞）
   5. 按原始文字的 。！？ 切句，對應 items index → Segment
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .transcribe import Segment, prepare_audio
+from .transcribe import Segment, prepare_audio, _filter_hallucinations
 
 QWEN3_ASR_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
 QWEN3_ALIGNER_MODEL = "mlx-community/Qwen3-ForcedAligner-0.6B-8bit"
@@ -40,45 +40,46 @@ def _split_sentences(text: str) -> list[str]:
     return sentences
 
 
-def _count_clean_tokens(text: str) -> int:
-    """
-    統計 nagisa 對 text 產生的 clean token 數。
-    與 ForcedAligner 內部 tokenize_japanese + clean_token 邏輯一致。
-    """
-    import unicodedata
-    import nagisa
-
-    def is_kept(ch: str) -> bool:
-        if ch == "'":
-            return True
-        cat = unicodedata.category(ch)
-        return cat.startswith("L") or cat.startswith("N")
-
-    words = nagisa.tagging(text).words
-    return sum(1 for w in words if any(is_kept(ch) for ch in w))
-
-
 def _items_to_segments(items, text: str, chunk_offset: float) -> list[Segment]:
     """
-    把 ForcedAligner 的詞級 items（無標點）＋原始文字（含標點），
-    切成句子級 Segment，加上 chunk offset。
+    把 ForcedAligner 的詞級 items 按句子切成 Segment。
 
-    做法：
-      1. 把 text 按 。！？ 切句
-      2. 每句用 nagisa 數 clean token 數量 n
-      3. 從 items 取 n 個，得到該句的時間範圍
+    直接用 item.text 的字元數累加來找句子邊界，不需要重跑 nagisa。
+    ForcedAligner 的每個 item.text 已是 clean token（無標點），
+    其字元數總和等於句子去標點後的字元數。
     """
     sentences = _split_sentences(text)
     if not sentences or not items:
         return []
 
+    import unicodedata
+
+    def _clean_len(s: str) -> int:
+        """句子去掉標點後的字元數，對應 item.text 字元數之和。"""
+        return sum(
+            1 for ch in s
+            if ch == "'" or unicodedata.category(ch)[:1] in ("L", "N")
+        )
+
     segments: list[Segment] = []
     item_idx = 0
 
     for sentence in sentences:
-        n = _count_clean_tokens(sentence)
-        if n == 0 or item_idx >= len(items):
+        if item_idx >= len(items):
+            break
+
+        target_len = _clean_len(sentence)
+        if target_len == 0:
             continue
+
+        # 累加 item.text 字元數直到覆蓋整句
+        accumulated = 0
+        n = 0
+        for item in items[item_idx:]:
+            accumulated += len(item.text)
+            n += 1
+            if accumulated >= target_len:
+                break
 
         sent_items = items[item_idx: item_idx + n]
         item_idx += n
@@ -124,7 +125,7 @@ def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None
         # 2. 載入音訊並切 chunk
         print("[qwen3-asr] 載入音訊...")
         audio_np = np.array(load_audio(str(audio_path)))
-        chunks = split_audio_into_chunks(audio_np, sr=16000, chunk_duration=120.0)
+        chunks = split_audio_into_chunks(audio_np, sr=16000, chunk_duration=60.0)
         print(f"[qwen3-asr] 分為 {len(chunks)} 個 chunk")
 
         # 3. ASR：每個 chunk 取得文字
@@ -137,9 +138,9 @@ def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None
             result = asr_model.generate(
                 chunk_audio,
                 language="Japanese",
-                max_tokens=8192,
+                max_tokens=512,
                 temperature=0.0,
-                repetition_penalty=1.1,
+                repetition_penalty=1.2,
                 repetition_context_size=100,
                 verbose=False,
             )
@@ -173,5 +174,6 @@ def transcribe_qwen3(input_path: str | Path, audio_save_path: Path | None = None
         del aligner
         mx.clear_cache()
 
-        print(f"[qwen3-asr] 完成，共 {len(all_segments)} 段")
-        return all_segments
+        filtered = _filter_hallucinations(all_segments)
+        print(f"[qwen3-asr] 完成，共 {len(all_segments)} 段（過濾後 {len(filtered)} 段）")
+        return filtered
