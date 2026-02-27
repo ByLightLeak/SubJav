@@ -1,0 +1,24 @@
+[project]
+name = "subjav"
+version = "0.1.0"
+description = "Japanese video auto-subtitle generator (ASR + LLM translation)"
+requires-python = ">=3.10"
+dependencies = [
+    "mlx-audio>=0.3.1",
+    "httpx",
+    "typer",
+    "nagisa>=0.2.12",
+]
+
+[project.scripts]
+subjav = "src.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.uv]
+prerelease = "allow"
