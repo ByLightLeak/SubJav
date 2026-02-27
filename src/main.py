@@ -220,7 +220,14 @@ def process(
         video = Path(target)
         if not video.is_absolute() and "video_dir" in cfg:
             video = Path(cfg["video_dir"]) / video
-        videos = [video]
+        if video.is_dir():
+            found = _find_videos(video)
+            if not found:
+                typer.echo(f"在 {video} 找不到影片檔", err=True)
+                raise typer.Exit(1)
+            videos = found
+        else:
+            videos = [video]
     else:
         video_dir_str = cfg.get("video_dir")
         if not video_dir_str:

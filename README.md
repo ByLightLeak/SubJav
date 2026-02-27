@@ -35,9 +35,19 @@ cp subjav.toml.example subjav.toml
 
 ```toml
 [defaults]
+# 影片根目錄（必填）
 video_dir = "/path/to/your/videos"
+
+# ASR 後端：whisper / qwen3 / hybrid（預設 whisper）
 backend = "hybrid"
+
+# true → 只產 SRT，不嵌入影片
+# false → 產 SRT 並嵌入軟字幕
 srt_only = true
+
+# true → 嵌入硬字幕（燒錄進畫面，任何播放器都看得到）
+# false → 嵌入軟字幕（可在播放器切換顯示）
+hard_sub = false
 ```
 
 `subjav.toml` 已加入 `.gitignore`，不會被 commit。
@@ -48,13 +58,16 @@ srt_only = true
 
 ```bash
 # 自動掃描 video_dir 下所有影片，逐一處理
-subjav
+uv run subjav
+
+# 給目錄名，自動找裡面的影片
+uv run subjav fc2-ppv-1234567/
 
 # 指定單一影片（相對於 video_dir）
-subjav fc2-ppv-1234567/fc2-ppv-1234567_720p.mp4
+uv run subjav fc2-ppv-1234567/fc2-ppv-1234567_720p.mp4
 
 # 指定絕對路徑
-subjav /path/to/video.mp4
+uv run subjav /path/to/video.mp4
 ```
 
 **常用選項：**
