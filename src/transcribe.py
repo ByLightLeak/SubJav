@@ -19,7 +19,7 @@ VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".flv"}
 MLX_MODEL = "mlx-community/whisper-large-v3-mlx"
 
 # Whisper initial prompt：引導模型輸出日語，抑制幻覺與英文混入
-INITIAL_PROMPT = "日本語のアダルトビデオ。あっ、はぁ、んっ、うぁ、ふぁ、ひゃ、んー。ダメ、イク、イキそう、気持ちいい、中に出さないで。射精、中出し、フェラ、クンニ、おちんちん、乳首、性感帯、クリトリス。"
+INITIAL_PROMPT = "日本語のアダルトビデオ。あっ、はぁ、んっ、うぁ、ふぁ、ひゃ、うん、あーん、おっ、いやん、ふぅ、ひぃ、んぁ、あぁ。ダメ。気持ちいい。もっと奥まで。イキそう。中に出さないで。感じてる。濡れてる。イっちゃう。舐めていい？乳首が好き。恥ずかしい。出していい？気持ちよかった。フェラ、クンニ、手マン、手コキ、パイズリ、アナル、騎乗位、バック、中出し、顔射、潮吹き、射精。クリトリス、おまんこ、チンポ、おちんちん、膣、乳頭、おっぱい、亀頭、お尻、挿入、性感帯。"
 
 
 def _ensure_whisper_processor() -> None:
@@ -113,29 +113,32 @@ def transcribe(input_path: str | Path, audio_save_path: Path | None = None) -> l
 
     with prepare_audio(input_path, audio_save_path, "transcribe") as audio_path:
         print("[transcribe] 開始轉錄（mlx-audio Whisper Large V3）...")
+
+        def _generate(m) -> object:
+            return m.generate(
+                str(audio_path),
+                language="ja",
+                initial_prompt=INITIAL_PROMPT,
+                verbose=False,
+                compression_ratio_threshold=2.4,
+                logprob_threshold=-1.0,
+                no_speech_threshold=0.4,
+                hallucination_silence_threshold=2.0,
+                condition_on_previous_text=True,
+                temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+                prepend_punctuations="\"'¿([{-「『【〔（",
+                append_punctuations="\"'.。,，!！?？:：\")]}、」』】〕）～…",
+            )
+
+        model = stt_load(MLX_MODEL)
         try:
-            model = stt_load(MLX_MODEL)
+            result = _generate(model)
         except ValueError as e:
             if "Processor not found" not in str(e):
                 raise
             _ensure_whisper_processor()
             model = stt_load(MLX_MODEL)
-
-        result = model.generate(
-            str(audio_path),
-            language="ja",
-            initial_prompt=INITIAL_PROMPT,
-            verbose=False,
-            compression_ratio_threshold=2.4,
-            logprob_threshold=-1.0,
-            no_speech_threshold=0.4,
-            hallucination_silence_threshold=2.0,
-            condition_on_previous_text=True,
-            carry_initial_prompt=True,
-            temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
-            prepend_punctuations="\"'¿([{-「『【〔（",
-            append_punctuations="\"'.。,，!！?？:：\")]}、」』】〕）～…",
-        )
+            result = _generate(model)
 
         del model
         mx.clear_cache()
