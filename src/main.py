@@ -60,10 +60,8 @@ def _process_video(
 
     if output_dir is not None:
         work_dir = output_dir / video.stem
-    elif cfg.get("output_beside_video", False):
-        work_dir = video.parent
     else:
-        work_dir = Path("output") / video.stem
+        work_dir = video.parent
     work_dir.mkdir(parents=True, exist_ok=True)
 
     stem = video.stem
