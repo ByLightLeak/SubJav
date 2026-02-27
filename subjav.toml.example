@@ -16,3 +16,8 @@ backend = "hybrid"
 #   srt_only = true                    → 只產 SRT，不嵌入影片
 srt_only = true
 hard_sub = false
+
+# Ollama 設定（選填）
+#   翻譯與合併皆透過 Ollama API 執行，預設連本機
+# ollama_model = "qwen3:14b"
+# ollama_host = "http://localhost:11434"

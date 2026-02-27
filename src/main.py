@@ -31,6 +31,7 @@ def _load_config() -> dict:
     return {}
 
 
+
 def _find_videos(directory: Path) -> list[Path]:
     """遞迴搜尋目錄內所有影片檔，依路徑排序。"""
     from .transcribe import VIDEO_EXTENSIONS
@@ -208,6 +209,13 @@ def process(
       hybrid   Whisper 時間戳 + Qwen3 文字品質，推薦
     """
     cfg = _load_config()
+
+    # 套用 Ollama 設定（可指向外部主機或換模型）
+    from . import translate as _t
+    if "ollama_model" in cfg:
+        _t.MODEL = cfg["ollama_model"]
+    if "ollama_host" in cfg:
+        _t.OLLAMA_HOST = cfg["ollama_host"]
 
     # CLI 參數優先；未指定則從 config 讀；最後才用 hardcoded 預設值
     if backend is None:

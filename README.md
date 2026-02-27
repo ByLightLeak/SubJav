@@ -1,8 +1,8 @@
 # SubJav
 
-Local Japanese video auto-subtitle generator. Fully offline — no data is uploaded.
+Local Japanese video auto-subtitle generator. **MLX-powered, Apple Silicon only.** Fully offline — no data is uploaded.
 
-**Pipeline:** Video → ASR transcribe Japanese → LLM translate to Traditional Chinese → Output SRT
+**Pipeline:** Video → ASR transcribe Japanese (MLX) → LLM translate to Traditional Chinese → Output SRT
 
 ---
 
@@ -10,7 +10,7 @@ Local Japanese video auto-subtitle generator. Fully offline — no data is uploa
 
 - Apple Silicon Mac (uses MLX acceleration)
 - Python 3.11+
-- [Ollama](https://ollama.com/) with model pulled: `ollama pull qwen3:14b`
+- [Ollama](https://ollama.com/): `brew install ollama` then `ollama pull qwen3:14b`
 - ffmpeg: `brew install ffmpeg`
 
 ---
@@ -48,6 +48,10 @@ srt_only = true
 # true → burn subtitles into video (visible in any player)
 # false → embed as soft subtitles (can be toggled in player)
 hard_sub = false
+
+# Ollama settings (optional)
+# ollama_model = "qwen3:14b"
+# ollama_host = "http://localhost:11434"
 ```
 
 `subjav.toml` is in `.gitignore` and will not be committed.
@@ -116,9 +120,9 @@ Re-running skips existing cache and only processes missing steps.
 
 # SubJav
 
-本地日語影片字幕自動生成工具。全程離線，不上傳任何資料。
+本地日語影片字幕自動生成工具。**基於 MLX，僅支援 Apple Silicon。** 全程離線，不上傳任何資料。
 
-**流程：** 影片 → ASR 轉錄日語 → LLM 翻譯繁體中文 → 輸出 SRT
+**流程：** 影片 → ASR 轉錄日語（MLX） → LLM 翻譯繁體中文 → 輸出 SRT
 
 ---
 
@@ -126,7 +130,7 @@ Re-running skips existing cache and only processes missing steps.
 
 - Apple Silicon Mac（使用 MLX 加速）
 - Python 3.11+
-- [Ollama](https://ollama.com/) 並已拉取模型：`ollama pull qwen3:14b`
+- [Ollama](https://ollama.com/)：`brew install ollama`，再執行 `ollama pull qwen3:14b`
 - ffmpeg：`brew install ffmpeg`
 
 ---
@@ -164,6 +168,10 @@ srt_only = true
 # true → 嵌入硬字幕（燒錄進畫面，任何播放器都看得到）
 # false → 嵌入軟字幕（可在播放器切換顯示）
 hard_sub = false
+
+# Ollama 設定（選填）
+# ollama_model = "qwen3:14b"
+# ollama_host = "http://localhost:11434"
 ```
 
 `subjav.toml` 已加入 `.gitignore`，不會被 commit。

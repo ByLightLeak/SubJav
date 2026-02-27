@@ -5,7 +5,7 @@ import re
 import time
 import httpx
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_HOST = "http://localhost:11434"
 _NUMBERED_RE = re.compile(r'^(\d+)\s*[|.:)\-]\s*(.+)$')
 MODEL = "qwen3:14b"
 BATCH_SIZE = 10
@@ -64,10 +64,10 @@ def _call_ollama(prompt: str, system: str = SYSTEM_PROMPT, timeout: float = 120.
         "options": options if options is not None else OPTIONS,
     }
     try:
-        response = httpx.post(OLLAMA_URL, json=payload, timeout=timeout)
+        response = httpx.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=timeout)
         response.raise_for_status()
     except httpx.ConnectError:
-        raise RuntimeError("無法連線 Ollama（http://localhost:11434），請確認 Ollama 已啟動")
+        raise RuntimeError(f"無法連線 Ollama（{OLLAMA_HOST}），請確認 Ollama 已啟動")
     except httpx.HTTPStatusError as e:
         raise RuntimeError(f"Ollama API 錯誤: {e.response.status_code} {e.response.text}")
     return response.json().get("response", "").strip()
@@ -336,7 +336,7 @@ def _unload_model() -> None:
     """通知 Ollama 立刻 unload 模型，釋放 GPU/RAM。"""
     try:
         httpx.post(
-            OLLAMA_URL,
+            f"{OLLAMA_HOST}/api/generate",
             json={"model": MODEL, "keep_alive": 0},
             timeout=10.0,
         )
